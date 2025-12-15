@@ -4,13 +4,22 @@ import type { ProductEvaluationResponse } from "@/types/evaluation";
 import type { DecisionKind, ProductDecisionOut } from "@/types/evaluation";
 import type { ProductTriageOut } from "@/types/triage";
 
-export async function fetchProductEvaluation(productId: number): Promise<ProductEvaluationResponse> {
-    const res = await fetch(`${API_BASE_URL}/products/${productId}/evaluation`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Failed to fetch evaluation: ${res.status}`);
+export async function fetchProductEvaluation(productId: number) {
+    if (!Number.isFinite(productId) || productId <= 0) {
+        throw new Error("Invalid productId for evaluation fetch");
+    }
+
+    const res = await fetch(`${API_BASE_URL}/products/${productId}/evaluation`, {
+        cache: "no-store",
+    });
+
+    if (!res.ok) {
+        throw new Error(`Failed to fetch evaluation: ${res.status}`);
+    }
+
     const data: unknown = await res.json();
     return data as ProductEvaluationResponse;
 }
-
 
 const API_BASE_URL =
     process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -236,3 +245,5 @@ export async function fetchProductsRanking() {
 
     return res.json();
 }
+
+

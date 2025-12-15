@@ -97,4 +97,17 @@ export type ProductEvaluationResponse = {
 
     blockers: Blocker[];
     notes: string[];
+    score?: ScoreSummary | null; // <- NOVO
+
 };
+
+export type ScoreSummary = {
+    total_score: number;
+    classification: string;
+    demand_score: number;
+    competition_score: number;
+    margin_score: number;
+    risk_score: number;
+    reasons: string[];
+};
+
