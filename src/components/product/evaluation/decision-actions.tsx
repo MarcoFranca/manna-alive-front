@@ -3,43 +3,52 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type { DecisionKind, ProductDecisionOut } from "@/types/evaluation";
+import type { ProductDecisionOut, DecisionKind } from "@/types/decision";
 import { createProductDecision } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 type Props = {
     productId: number;
-    latestDecision?: ProductDecisionOut | null;
+    latestDecision: ProductDecisionOut | null;
 };
 
-function decisionLabel(kind: DecisionKind): string {
-    switch (kind) {
+function decisionLabel(d: DecisionKind): string {
+    switch (d) {
         case "approve_test":
-            return "Aprovado para teste";
+            return "Aprovar para TESTE";
         case "approve_import":
-            return "Aprovado para importar";
+            return "Aprovar para IMPORTAR";
         case "reject":
-            return "Reprovado";
+            return "Reprovar";
         case "needs_data":
-            return "Pendência de dados";
+            return "Precisa de dados";
     }
 }
 
-function decisionBadgeVariant(kind: DecisionKind): "default" | "secondary" | "destructive" | "outline" {
-    switch (kind) {
-        case "approve_test":
-        case "approve_import":
-            return "default";
-        case "needs_data":
-            return "secondary";
-        case "reject":
-            return "destructive";
-    }
+function decisionBadgeVariant(decision: DecisionKind): "default" | "secondary" | "destructive" | "outline" {
+    if (decision === "approve_test" || decision === "approve_import") return "default";
+    if (decision === "needs_data") return "secondary";
+    if (decision === "reject") return "destructive";
+    return "outline";
 }
 
 export function DecisionActions({ productId, latestDecision }: Props) {
@@ -49,108 +58,117 @@ export function DecisionActions({ productId, latestDecision }: Props) {
     const [decision, setDecision] = useState<DecisionKind>("approve_test");
     const [reason, setReason] = useState("");
     const [decidedBy, setDecidedBy] = useState("");
+    const [loading, setLoading] = useState(false);
 
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const canSubmit = useMemo(() => {
+        return reason.trim().length >= 3 && !loading;
+    }, [reason, loading]);
 
-    const canSubmit = useMemo(() => reason.trim().length >= 3 && !submitting, [reason, submitting]);
-
-    async function submit() {
-        setSubmitting(true);
-        setError(null);
+    async function onSubmit() {
         try {
+            setLoading(true);
             await createProductDecision(productId, {
                 decision,
                 reason: reason.trim(),
-                decided_by: decidedBy.trim() ? decidedBy.trim() : undefined,
+                decided_by: decidedBy.trim() ? decidedBy.trim() : null,
             });
+
             setOpen(false);
             setReason("");
-            router.refresh(); // recarrega a evaluation page (server component) e traz latest_decision atualizado
+            setDecidedBy("");
+            router.refresh();
         } catch (e) {
-            setError(e instanceof Error ? e.message : "Erro ao salvar decisão");
-        } finally {
-            setSubmitting(false);
+            console.error(e);
+            setLoading(false);
         }
     }
 
     return (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-                <div className="text-sm font-medium">Decisão atual</div>
+        <div className="flex flex-col gap-2">
+            {/* Latest decision */}
+            <div className="flex flex-wrap items-center gap-2">
                 {latestDecision ? (
-                    <div className="flex flex-wrap items-center gap-2">
+                    <>
                         <Badge variant={decisionBadgeVariant(latestDecision.decision)} className="text-xs">
-                            {decisionLabel(latestDecision.decision)}
+                            Última decisão: {decisionLabel(latestDecision.decision)}
                         </Badge>
-                        <div className="text-xs text-muted-foreground">
-                            {latestDecision.decided_by ? `Por ${latestDecision.decided_by} • ` : null}
-                            {new Date(latestDecision.created_at).toLocaleString()}
-                        </div>
-                    </div>
+                        <span className="text-xs text-muted-foreground">
+              {new Date(latestDecision.created_at).toLocaleString("pt-BR")}
+                            {latestDecision.decided_by ? ` • por ${latestDecision.decided_by}` : ""}
+            </span>
+                    </>
                 ) : (
-                    <div className="text-xs text-muted-foreground">Nenhuma decisão registrada ainda.</div>
+                    <Badge variant="outline" className="text-xs">
+                        Sem decisão registrada ainda
+                    </Badge>
                 )}
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
-                <div className="flex flex-wrap gap-2">
-                    <DialogTrigger asChild>
-                        <Button variant="secondary" onClick={() => { setDecision("needs_data"); setReason(""); }}>
-                            Pendenciar
-                        </Button>
-                    </DialogTrigger>
-                    <DialogTrigger asChild>
-                        <Button variant="destructive" onClick={() => { setDecision("reject"); setReason(""); }}>
-                            Reprovar
-                        </Button>
-                    </DialogTrigger>
-                    <DialogTrigger asChild>
-                        <Button onClick={() => { setDecision("approve_test"); setReason(""); }}>
-                            Aprovar teste
-                        </Button>
-                    </DialogTrigger>
-                    <DialogTrigger asChild>
-                        <Button variant="outline" onClick={() => { setDecision("approve_import"); setReason(""); }}>
-                            Aprovar importação
-                        </Button>
-                    </DialogTrigger>
-                </div>
+            <div className="flex flex-wrap gap-2">
+                <Button onClick={() => setOpen(true)} className="shadow-[0_0_24px_-14px_rgba(217,70,239,0.9)]">
+                    Registrar decisão
+                </Button>
 
-                <DialogContent className="sm:max-w-lg">
+                <Button variant="secondary" onClick={() => router.push("/products")}>
+                    Voltar para produtos
+                </Button>
+            </div>
+
+            {/* Dialog */}
+            <Dialog open={open} onOpenChange={setOpen}>
+                <DialogContent className="sm:max-w-xl">
                     <DialogHeader>
                         <DialogTitle>Registrar decisão</DialogTitle>
+                        <DialogDescription>
+                            Grave sua decisão com justificativa. Isso vira histórico e aparece na triagem.
+                        </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-3">
-                        <div className="text-sm">
-                            Tipo: <span className="font-medium">{decisionLabel(decision)}</span>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <div className="text-sm font-medium">Tipo de decisão</div>
+                            <Select value={decision} onValueChange={(v) => setDecision(v as DecisionKind)}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="approve_test">{decisionLabel("approve_test")}</SelectItem>
+                                    <SelectItem value="approve_import">{decisionLabel("approve_import")}</SelectItem>
+                                    <SelectItem value="needs_data">{decisionLabel("needs_data")}</SelectItem>
+                                    <SelectItem value="reject">{decisionLabel("reject")}</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
-                        <div className="space-y-1">
-                            <div className="text-sm font-medium">Motivo / justificativa</div>
+                        <div className="space-y-2">
+                            <div className="text-sm font-medium">Justificativa</div>
                             <Textarea
                                 value={reason}
                                 onChange={(e) => setReason(e.target.value)}
-                                placeholder="Ex.: Margem ok no conservador, concorrência aceitável, sem impeditivos de NCM."
+                                placeholder="Ex.: Aprova no conservador com 38% e demanda 6/dia; risco ok; testar com lote pequeno."
+                                rows={5}
                             />
-                            <div className="text-xs text-muted-foreground">Mínimo: 3 caracteres. Isso vira histórico e ajuda futuras decisões.</div>
+                            <div className="text-xs text-muted-foreground">
+                                Mínimo 3 caracteres. Seja objetivo: “por que sim / por que não / o que falta”.
+                            </div>
                         </div>
 
-                        <div className="space-y-1">
+                        <div className="space-y-2">
                             <div className="text-sm font-medium">Decidido por (opcional)</div>
-                            <Input value={decidedBy} onChange={(e) => setDecidedBy(e.target.value)} placeholder="Ex.: Camila" />
+                            <Input
+                                value={decidedBy}
+                                onChange={(e) => setDecidedBy(e.target.value)}
+                                placeholder="Ex.: Camila"
+                            />
                         </div>
-
-                        {error ? <div className="text-sm text-destructive">{error}</div> : null}
                     </div>
 
-                    <DialogFooter className="gap-2">
-                        <Button variant="secondary" onClick={() => setOpen(false)} disabled={submitting}>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button variant="outline" onClick={() => setOpen(false)} disabled={loading}>
                             Cancelar
                         </Button>
-                        <Button onClick={submit} disabled={!canSubmit}>
-                            {submitting ? "Salvando..." : "Salvar decisão"}
+                        <Button onClick={onSubmit} disabled={!canSubmit}>
+                            {loading ? "Salvando..." : "Salvar decisão"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

@@ -11,10 +11,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
 import { ExternalLink, LineChart } from "lucide-react";
-import {MarketDataPayload} from "@/components/product/market/market-helpers";
-import {MarketForm} from "@/components/product/market/market-form";
-import {ScorePanel} from "@/components/product/market/score-panel";
-
+import { MarketForm } from "./market-form";
+import { ScorePanel } from "./score-panel";
+import type { MarketDataPayload } from "./market-helpers";
 
 type ProductRef = { id: number; name: string };
 

@@ -1,8 +1,38 @@
 // src/lib/api.ts
 
 import type { ProductEvaluationResponse } from "@/types/evaluation";
-import type { DecisionKind, ProductDecisionOut } from "@/types/evaluation";
+import type { ProductDecisionOut,  } from "@/types/evaluation";
 import type { ProductTriageOut } from "@/types/triage";
+import {ProductDecisionCreate} from "@/types/decision";
+
+
+export async function createProductDecision(productId: number, payload: ProductDecisionCreate): Promise<ProductDecisionOut> {
+    const res = await fetch(`${API_BASE_URL}/products/${productId}/decisions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+    });
+
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Failed to create decision: ${res.status} ${text}`);
+    }
+
+    const data: unknown = await res.json();
+    return data as ProductDecisionOut;
+}
+
+export async function fetchLatestDecision(productId: number): Promise<ProductDecisionOut | null> {
+    const res = await fetch(`${API_BASE_URL}/products/${productId}/decisions/latest`, {
+        cache: "no-store",
+    });
+
+    if (!res.ok) throw new Error(`Failed to fetch latest decision: ${res.status}`);
+
+    const data: unknown = await res.json();
+    return (data as ProductDecisionOut | null) ?? null;
+}
 
 export async function fetchProductEvaluation(productId: number) {
     if (!Number.isFinite(productId) || productId <= 0) {
@@ -143,20 +173,6 @@ export async function deleteProduct(id: number) {
     }
 
     return true;
-}
-
-export async function createProductDecision(
-    productId: number,
-    payload: { decision: DecisionKind; reason: string; decided_by?: string }
-): Promise<ProductDecisionOut> {
-    const res = await fetch(`${API_BASE_URL}/products/${productId}/decisions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`Failed to create decision: ${res.status}`);
-    const data: unknown = await res.json();
-    return data as ProductDecisionOut;
 }
 
 export async function simulateImport(productId: number, data: unknown) {

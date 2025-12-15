@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { ProductTriageOut, TriageStatus } from "@/types/triage";
+import type { DecisionKind, ProductDecisionOut } from "@/types/decision";
 import { deleteProduct } from "@/lib/api";
 
 import { NewProductSheet } from "@/components/product/new-product-sheet";
@@ -45,6 +46,13 @@ type Props = {
 
 type FilterKey = "all" | TriageStatus;
 type SortKey = "recommended" | "score_desc" | "newest" | "name_az";
+
+type DecisionFilter =
+    | "all_decisions"
+    | "no_decision"
+    | "needs_data"
+    | "approved"
+    | "rejected";
 
 function parseDateMs(isoLike: string): number {
     const t = Date.parse(isoLike);
@@ -103,16 +111,7 @@ function clampPct(v: number): number {
     return Math.max(0, Math.min(100, v));
 }
 
-// Barras simples (0..100)
-function ScoreBar({
-                      label,
-                      value,
-                      hint,
-                  }: {
-    label: string;
-    value: number;
-    hint?: string;
-}) {
+function ScoreBar({ label, value, hint }: { label: string; value: number; hint?: string }) {
     const pct = clampPct(value);
     return (
         <div className="space-y-1">
@@ -130,13 +129,41 @@ function ScoreBar({
     );
 }
 
+function decisionLabel(decision: DecisionKind): string {
+    switch (decision) {
+        case "approve_test":
+            return "Aprovado p/ teste";
+        case "approve_import":
+            return "Aprovado p/ importar";
+        case "needs_data":
+            return "Precisa de dados";
+        case "reject":
+            return "Reprovado";
+    }
+}
+
+function decisionBadgeVariant(decision: DecisionKind): "default" | "secondary" | "destructive" | "outline" {
+    if (decision === "approve_test" || decision === "approve_import") return "default";
+    if (decision === "needs_data") return "secondary";
+    if (decision === "reject") return "destructive";
+    return "outline";
+}
+
+function decisionRank(d: ProductDecisionOut | null | undefined): number {
+    if (!d) return 0; // sem decisão = topo
+    if (d.decision === "needs_data") return 1;
+    if (d.decision === "approve_test") return 2;
+    if (d.decision === "approve_import") return 3;
+    if (d.decision === "reject") return 9;
+    return 5;
+}
+
 function toLegacyProductShape(p: ProductTriageOut) {
-    // Compatibilidade com ProductMarketSheet e EditProductForm
     return {
         id: p.product_id,
         name: p.product_name,
         category: p.category,
-        description: null as string | null, // triage não traz description hoje
+        description: null as string | null,
         fob_price_usd: p.fob_price_usd,
         freight_usd: p.freight_usd,
         created_at: p.created_at,
@@ -147,7 +174,6 @@ function buildReasons(p: ProductTriageOut): string[] {
     const serverReasons = p.score?.reasons ?? [];
     if (serverReasons.length > 0) return serverReasons.slice(0, 5);
 
-    // fallback (se include_score=false ou reasons vazio)
     const reasons: string[] = [];
     reasons.push(`Próxima ação: ${p.next_action}`);
     if (p.last_simulation?.estimated_margin_pct) {
@@ -157,11 +183,25 @@ function buildReasons(p: ProductTriageOut): string[] {
     return reasons.slice(0, 4);
 }
 
+function matchesDecisionFilter(p: ProductTriageOut, f: DecisionFilter): boolean {
+    if (f === "all_decisions") return true;
+
+    const d = p.latest_decision?.decision ?? null;
+
+    if (f === "no_decision") return d === null;
+    if (f === "needs_data") return d === "needs_data";
+    if (f === "rejected") return d === "reject";
+    if (f === "approved") return d === "approve_test" || d === "approve_import";
+
+    return true;
+}
+
 export function ProductsClient({ triage }: Props) {
     const router = useRouter();
 
     const [query, setQuery] = useState("");
     const [filter, setFilter] = useState<FilterKey>("all");
+    const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all_decisions");
     const [sort, setSort] = useState<SortKey>("recommended");
 
     const [editOpen, setEditOpen] = useState(false);
@@ -189,13 +229,20 @@ export function ProductsClient({ triage }: Props) {
         const needMarket = triage.filter((p) => p.status === "needs_market").length;
         const needCosts = triage.filter((p) => p.status === "needs_costs").length;
 
+        const noDecision = triage.filter((p) => !p.latest_decision).length;
+        const needsData = triage.filter((p) => p.latest_decision?.decision === "needs_data").length;
+        const approved = triage.filter(
+            (p) => p.latest_decision?.decision === "approve_test" || p.latest_decision?.decision === "approve_import"
+        ).length;
+        const rejected = triage.filter((p) => p.latest_decision?.decision === "reject").length;
+
         const topScore =
             triage
                 .map((p) => p.score?.total_score ?? null)
                 .filter((x): x is number => typeof x === "number")
                 .sort((a, b) => b - a)[0] ?? null;
 
-        return { total, ready, needSim, needMarket, needCosts, topScore };
+        return { total, ready, needSim, needMarket, needCosts, topScore, noDecision, needsData, approved, rejected };
     }, [triage]);
 
     const list = useMemo(() => {
@@ -208,15 +255,23 @@ export function ProductsClient({ triage }: Props) {
 
             const matchesFilter = filter === "all" ? true : p.status === filter;
 
-            return matchesText && matchesFilter;
+            const matchesDecision = matchesDecisionFilter(p, decisionFilter);
+
+            return matchesText && matchesFilter && matchesDecision;
         });
 
         const sorted = [...filtered].sort((a, b) => {
             if (sort === "recommended") {
+                const da = decisionRank(a.latest_decision ?? null);
+                const db = decisionRank(b.latest_decision ?? null);
+                if (da !== db) return da - db;
+
                 if (a.priority_rank !== b.priority_rank) return a.priority_rank - b.priority_rank;
+
                 const sa = a.score?.total_score ?? -1;
                 const sb = b.score?.total_score ?? -1;
                 if (sa !== sb) return sb - sa;
+
                 return parseDateMs(b.created_at) - parseDateMs(a.created_at);
             }
 
@@ -234,7 +289,7 @@ export function ProductsClient({ triage }: Props) {
         });
 
         return sorted;
-    }, [triage, query, filter, sort]);
+    }, [triage, query, filter, decisionFilter, sort]);
 
     const spotlight = list[0] ?? null;
 
@@ -248,7 +303,7 @@ export function ProductsClient({ triage }: Props) {
                     </div>
                     <h1 className="text-2xl font-semibold tracking-tight">Produtos</h1>
                     <p className="text-sm text-muted-foreground">
-                        A tela já te mostra prioridade, alertas e por que cada item merece atenção.
+                        Prioridade, alertas, score e (agora) decisão registrada — tudo num só lugar.
                     </p>
                 </div>
 
@@ -278,32 +333,32 @@ export function ProductsClient({ triage }: Props) {
                     </CardContent>
                 </Card>
 
-                <Card className="bg-background/70 backdrop-blur border ring-1 ring-cyan-400/10">
+                <Card className="bg-background/70 backdrop-blur border ring-1 ring-fuchsia-400/12">
                     <CardContent className="p-4 space-y-1">
-                        <div className="text-xs text-muted-foreground">Falta simulação</div>
-                        <div className="text-2xl font-semibold">{stats.needSim}</div>
-                        <div className="text-xs text-muted-foreground">validar margem</div>
+                        <div className="text-xs text-muted-foreground">Sem decisão</div>
+                        <div className="text-2xl font-semibold">{stats.noDecision}</div>
+                        <div className="text-xs text-muted-foreground">fila de trabalho</div>
                     </CardContent>
                 </Card>
 
                 <Card className="bg-background/70 backdrop-blur border ring-1 ring-amber-300/12">
                     <CardContent className="p-4 space-y-1">
-                        <div className="text-xs text-muted-foreground">Falta mercado</div>
-                        <div className="text-2xl font-semibold">{stats.needMarket}</div>
-                        <div className="text-xs text-muted-foreground">demanda/concorrência</div>
+                        <div className="text-xs text-muted-foreground">Precisa de dados</div>
+                        <div className="text-2xl font-semibold">{stats.needsData}</div>
+                        <div className="text-xs text-muted-foreground">pendências</div>
                     </CardContent>
                 </Card>
 
                 <Card className="bg-background/70 backdrop-blur border ring-1 ring-rose-400/12">
                     <CardContent className="p-4 space-y-1">
-                        <div className="text-xs text-muted-foreground">Falta custos</div>
-                        <div className="text-2xl font-semibold">{stats.needCosts}</div>
-                        <div className="text-xs text-muted-foreground">FOB/frete</div>
+                        <div className="text-xs text-muted-foreground">Reprovados</div>
+                        <div className="text-2xl font-semibold">{stats.rejected}</div>
+                        <div className="text-xs text-muted-foreground">no fim da fila</div>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* Spotlight com explicação */}
+            {/* Spotlight */}
             <Card className="mb-6 bg-background/70 backdrop-blur border ring-1 ring-fuchsia-400/12">
                 <CardContent className="p-4 space-y-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -325,6 +380,16 @@ export function ProductsClient({ triage }: Props) {
                                             {statusBadge(spotlight.status).label}
                                         </Badge>
 
+                                        {spotlight.latest_decision ? (
+                                            <Badge variant={decisionBadgeVariant(spotlight.latest_decision.decision)} className="text-xs">
+                                                {decisionLabel(spotlight.latest_decision.decision)}
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="outline" className="text-xs">
+                                                Sem decisão
+                                            </Badge>
+                                        )}
+
                                         {spotlight.score?.total_score != null ? (
                                             <Badge variant={scoreTone(spotlight.score.total_score).variant}>
                                                 {spotlight.score.total_score} • {scoreTone(spotlight.score.total_score).label}
@@ -340,9 +405,7 @@ export function ProductsClient({ triage }: Props) {
                                     </div>
                                 </>
                             ) : (
-                                <div className="text-sm text-muted-foreground">
-                                    Nada encontrado com os filtros atuais.
-                                </div>
+                                <div className="text-sm text-muted-foreground">Nada encontrado com os filtros atuais.</div>
                             )}
                         </div>
 
@@ -382,7 +445,6 @@ export function ProductsClient({ triage }: Props) {
 
                     {spotlight ? (
                         <div className="grid gap-4 md:grid-cols-2">
-                            {/* Por que abrir agora */}
                             <div className="rounded-lg border bg-background/50 p-3">
                                 <div className="text-sm font-medium mb-2">Por que abrir agora</div>
                                 <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
@@ -390,15 +452,22 @@ export function ProductsClient({ triage }: Props) {
                                         <li key={r}>{r}</li>
                                     ))}
                                 </ul>
+
+                                {spotlight.latest_decision ? (
+                                    <div className="mt-3 rounded-md border bg-background/60 p-3">
+                                        <div className="text-xs text-muted-foreground">Decisão registrada</div>
+                                        <div className="text-sm font-medium">
+                                            {decisionLabel(spotlight.latest_decision.decision)}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground mt-1">{spotlight.latest_decision.reason}</div>
+                                    </div>
+                                ) : null}
                             </div>
 
-                            {/* Breakdown */}
                             <div className="rounded-lg border bg-background/50 p-3 space-y-3">
                                 <div className="flex items-center justify-between">
                                     <div className="text-sm font-medium">Breakdown</div>
-                                    <div className="text-xs text-muted-foreground">
-                                        (quanto mais alto, melhor)
-                                    </div>
+                                    <div className="text-xs text-muted-foreground">(quanto mais alto, melhor)</div>
                                 </div>
 
                                 {spotlight.score ? (
@@ -475,13 +544,26 @@ export function ProductsClient({ triage }: Props) {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 justify-end">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+                    <Select value={decisionFilter} onValueChange={(v) => setDecisionFilter(v as DecisionFilter)}>
+                        <SelectTrigger className="w-[220px]">
+                            <SelectValue placeholder="Decisão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all_decisions">Decisão: todas</SelectItem>
+                            <SelectItem value="no_decision">Sem decisão</SelectItem>
+                            <SelectItem value="needs_data">Precisa de dados</SelectItem>
+                            <SelectItem value="approved">Aprovados</SelectItem>
+                            <SelectItem value="rejected">Reprovados</SelectItem>
+                        </SelectContent>
+                    </Select>
+
                     <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
                         <SelectTrigger className="w-[220px]">
                             <SelectValue placeholder="Ordenação" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="recommended">Recomendado (prioridade)</SelectItem>
+                            <SelectItem value="recommended">Recomendado (fila)</SelectItem>
                             <SelectItem value="score_desc">Maior score</SelectItem>
                             <SelectItem value="newest">Mais recentes</SelectItem>
                             <SelectItem value="name_az">Nome (A–Z)</SelectItem>
@@ -523,6 +605,16 @@ export function ProductsClient({ triage }: Props) {
 
                                                 <Badge variant={badge.variant}>{badge.label}</Badge>
 
+                                                {p.latest_decision ? (
+                                                    <Badge variant={decisionBadgeVariant(p.latest_decision.decision)} className="text-xs">
+                                                        {decisionLabel(p.latest_decision.decision)}
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge variant="outline" className="text-xs">
+                                                        Sem decisão
+                                                    </Badge>
+                                                )}
+
                                                 {score !== null ? (
                                                     <Badge variant={scoreTone(score).variant}>
                                                         {score} • {scoreTone(score).label}
@@ -537,8 +629,7 @@ export function ProductsClient({ triage }: Props) {
                                             </div>
 
                                             <div className="text-xs text-muted-foreground">
-                                                Próxima ação:{" "}
-                                                <span className="font-medium text-foreground">{p.next_action}</span>
+                                                Próxima ação: <span className="font-medium text-foreground">{p.next_action}</span>
                                             </div>
 
                                             <div className="flex flex-wrap gap-2 pt-1">
@@ -618,12 +709,11 @@ export function ProductsClient({ triage }: Props) {
                                         </div>
                                     </div>
 
-                                    {/* Details: explicação e breakdown por item */}
                                     <details className="rounded-lg border bg-background/50 p-3">
                                         <summary className="cursor-pointer select-none text-sm font-medium">
                                             Detalhes (por que vale atenção)
                                             <span className="ml-2 text-xs text-muted-foreground">
-                        • abre explicação, alertas e score breakdown
+                        • explicação, alertas, decisão e breakdown
                       </span>
                                         </summary>
 
@@ -635,6 +725,26 @@ export function ProductsClient({ triage }: Props) {
                                                         <li key={r}>{r}</li>
                                                     ))}
                                                 </ul>
+
+                                                {p.latest_decision ? (
+                                                    <div className="pt-2 rounded-lg border bg-background/60 p-3">
+                                                        <div className="text-xs text-muted-foreground">Decisão registrada</div>
+                                                        <div className="flex flex-wrap gap-2 items-center mt-1">
+                                                            <Badge variant={decisionBadgeVariant(p.latest_decision.decision)} className="text-xs">
+                                                                {decisionLabel(p.latest_decision.decision)}
+                                                            </Badge>
+                                                            <span className="text-xs text-muted-foreground">
+                                {new Date(p.latest_decision.created_at).toLocaleString("pt-BR")}
+                                                                {p.latest_decision.decided_by ? ` • por ${p.latest_decision.decided_by}` : ""}
+                              </span>
+                                                        </div>
+                                                        <div className="text-sm text-muted-foreground mt-2">{p.latest_decision.reason}</div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-xs text-muted-foreground pt-2">
+                                                        Sem decisão registrada ainda.
+                                                    </div>
+                                                )}
 
                                                 {p.alerts.length > 0 ? (
                                                     <div className="pt-2 flex flex-wrap gap-2">
@@ -684,7 +794,6 @@ export function ProductsClient({ triage }: Props) {
                 </div>
             )}
 
-            {/* Edit sheet */}
             <Sheet open={editOpen} onOpenChange={setEditOpen}>
                 <SheetContent side="right" className="sm:max-w-xl">
                     <SheetHeader>

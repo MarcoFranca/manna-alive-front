@@ -68,6 +68,13 @@ export type ScenarioResult = {
 
     approved: boolean;
     reason?: string | null;
+    net_sale_price_brl: number;
+    profit_unit_brl: number;
+    profit_total_brl: number;
+    roi_unit_pct: number;
+    roi_total_pct: number;
+    payback_days: number | null;
+
 };
 
 export type EvaluationHeader = {

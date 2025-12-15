@@ -1,3 +1,5 @@
+import {ProductDecisionOut} from "@/types/decision";
+
 export type TriageStatus = "ready" | "needs_simulation" | "needs_market" | "needs_costs";
 
 export type SimulationSummaryOut = {
@@ -55,6 +57,7 @@ export type ProductTriageOut = {
 
     last_simulation: SimulationSummaryOut | null;
     score: ScoreSummaryOut | null;
+    latest_decision?: ProductDecisionOut | null;
 
     alerts: string[];
 };

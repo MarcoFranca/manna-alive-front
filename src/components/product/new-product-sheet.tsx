@@ -1,42 +1,31 @@
 // src/components/product/new-product-sheet.tsx
 "use client";
 
-import { NewProductForm } from "@/components/product/new-product-form";
+import { Plus } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
-import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetDescription,
-    SheetTrigger,
-} from "@/components/ui/sheet";
+import { Sheet, SheetTrigger } from "@/components/ui/sheet";
+import { SheetShell } from "@/components/common/sheet-shell";
+
+// ✅ Troque o form antigo pelo wizard
+import { NewProductWizard } from "@/components/product/new-wizard/new-product-wizard";
 
 export function NewProductSheet() {
     return (
         <Sheet>
             <SheetTrigger asChild>
-                <Button>+ Novo produto</Button>
+                <Button className="cursor-pointer">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Novo produto
+                </Button>
             </SheetTrigger>
 
-            <SheetContent
-                side="right"
-                className="sm:max-w-xl p-0 flex flex-col"
+            <SheetShell
+                title="Novo produto"
+                description="Cadastre um produto para avaliar viabilidade. Comece pelo essencial e complete depois."
             >
-                {/* Cabeçalho com padding e borda inferior */}
-                <SheetHeader className="px-6 pt-4 pb-3 border-b">
-                    <SheetTitle>Novo produto</SheetTitle>
-                    <SheetDescription>
-                        Cadastre um produto para avaliar a viabilidade de importação.
-                    </SheetDescription>
-                </SheetHeader>
-
-                {/* Área de conteúdo scrollável */}
-                <div className="flex-1 overflow-y-auto px-6 py-4">
-                    {/* O formulário já é um card (border, bg-card, rounded) */}
-                    <NewProductForm />
-                </div>
-            </SheetContent>
+                <NewProductWizard />
+            </SheetShell>
         </Sheet>
     );
 }
