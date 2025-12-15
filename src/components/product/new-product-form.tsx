@@ -175,6 +175,9 @@ export function NewProductForm() {
 
             // 4) Atualiza lista
             router.refresh();
+            // 5) Vai direto para avaliação do produto criado
+            router.push(`/products/${createdProduct.id}/evaluation?from=wizard`);
+
         } catch (err) {
             console.error(err);
             setErrorMsg("Erro ao cadastrar produto. Verifique os dados.");
